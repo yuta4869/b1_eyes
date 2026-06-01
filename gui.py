@@ -7,16 +7,30 @@ import os
 import sys
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import messagebox, scrolledtext, ttk
 
 import cv2
 import requests
 from PIL import Image, ImageTk
 
-from main import OLLAMA_URL, VLMWorker, get_prompt
+from main import OLLAMA_URL, VLMWorker, get_prompt, parse_camera_source
 
 VIDEO_W, VIDEO_H = 640, 480
 TICK_MS = 33
+
+
+def pick_cjk_font_family(root: tk.Tk) -> str:
+    available = set(tkfont.families(root))
+    for cand in (
+        "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Hiragino Maru Gothic ProN",
+        "Noto Sans CJK JP", "Noto Sans JP", "Source Han Sans JP",
+        "Yu Gothic", "Yu Gothic UI", "Meiryo", "MS Gothic",
+        "DejaVu Sans",
+    ):
+        if cand in available:
+            return cand
+    return "TkDefaultFont"
 
 
 def list_ollama_models() -> list[str]:
@@ -29,11 +43,11 @@ def list_ollama_models() -> list[str]:
 
 
 class App:
-    def __init__(self, root: tk.Tk, default_model: str, camera_index: int):
+    def __init__(self, root: tk.Tk, default_model: str, camera_source):
         self.root = root
         self.root.title("VLM Camera — 物体認識 & 文字起こし")
         self.root.geometry("1180x680")
-        self.camera_index = camera_index
+        self.camera_source = camera_source
 
         self.cap: cv2.VideoCapture | None = None
         self.worker: VLMWorker | None = None
@@ -121,8 +135,9 @@ class App:
 
         right = ttk.LabelFrame(body, text="認識結果", padding=4)
         right.pack(side="right", fill="both", expand=True, padx=(4, 0))
+        cjk_family = pick_cjk_font_family(self.root)
         self.result_text = scrolledtext.ScrolledText(
-            right, wrap="word", font=("Hiragino Sans", 13), height=20, width=42,
+            right, wrap="word", font=(cjk_family, 13), height=20, width=42,
         )
         self.result_text.pack(fill="both", expand=True)
         self.result_text.insert("1.0", "「開始」を押してカメラを起動してください。\n自動モードでは指定間隔で繰り返し認識します。\n手動モードでは「今すぐ認識」を押した瞬間のフレームを送信します。")
@@ -152,12 +167,14 @@ class App:
         if not model:
             messagebox.showerror("モデル未指定", "モデルを選択してください。")
             return
-        self.cap = cv2.VideoCapture(self.camera_index)
+        self.cap = cv2.VideoCapture(self.camera_source)
         if not self.cap.isOpened():
             messagebox.showerror(
                 "カメラエラー",
-                "カメラを開けません。\nシステム設定 > プライバシーとセキュリティ > カメラ で、"
-                "実行端末（ターミナル等）の権限を許可してください。",
+                f"カメラ ({self.camera_source!r}) を開けません。\n\n"
+                "macOS: システム設定 > プライバシーとセキュリティ > カメラ で許可。\n"
+                "WSL2: usbipd-win で USB カメラをアタッチするか、\n"
+                "      --camera rtsp://... / http://.../stream を指定してください。",
             )
             self.cap = None
             return
@@ -279,7 +296,8 @@ class App:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="moondream")
-    parser.add_argument("--camera", type=int, default=0)
+    parser.add_argument("--camera", default="0",
+                        help="カメラ指定: 整数インデックス / /dev/video0 / rtsp:// / http://")
     args = parser.parse_args()
 
     root = tk.Tk()
@@ -297,7 +315,7 @@ def main() -> int:
         except tk.TclError:
             pass
 
-    App(root, default_model=args.model, camera_index=args.camera)
+    App(root, default_model=args.model, camera_source=parse_camera_source(args.camera))
     root.mainloop()
     return 0
 

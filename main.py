@@ -50,13 +50,36 @@ def get_prompt(lang: str) -> str:
     return PROMPTS.get(lang, PROMPTS["en"])
 
 JP_FONT_CANDIDATES = [
+    # macOS
     "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
     "/System/Library/Fonts/ヒラギノ角ゴ ProN W3.otf",
     "/System/Library/Fonts/Hiragino Sans GB.ttc",
     "/Library/Fonts/Arial Unicode.ttf",
     "/System/Library/Fonts/AppleSDGothicNeo.ttc",
     "/System/Library/Fonts/PingFang.ttc",
+    # Linux / WSL (fonts-noto-cjk package)
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    # Windows (if invoked from Windows-side Python)
+    "C:/Windows/Fonts/YuGothM.ttc",
+    "C:/Windows/Fonts/meiryo.ttc",
+    "C:/Windows/Fonts/msgothic.ttc",
 ]
+
+
+def parse_camera_source(value: str):
+    """Accept '0', '/dev/video0', 'rtsp://host', 'http://host/stream' etc.
+    Returns an int when the string is a plain integer; otherwise the string."""
+    if value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
 
 
 def load_jp_font(size: int) -> ImageFont.ImageFont:
@@ -288,7 +311,7 @@ def render_overlay(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mac camera + Ollama VLM")
     parser.add_argument("--model", default="moondream", help="Ollamaビジョンモデル名 (例: moondream, llava, llava:13b, llama3.2-vision)")
-    parser.add_argument("--camera", type=int, default=0, help="OpenCVカメラインデックス")
+    parser.add_argument("--camera", default="0", help="カメラ指定: 整数インデックス / /dev/video0 / rtsp:// / http://")
     parser.add_argument("--auto", action="store_true", help="自動キャプチャモードで起動")
     parser.add_argument("--interval", type=float, default=4.0, help="自動キャプチャ間隔 (秒)")
     parser.add_argument("--width", type=int, default=1280, help="撮影解像度 (幅)")
@@ -297,10 +320,13 @@ def main() -> int:
     parser.add_argument("--lang", default="ja", choices=["ja", "en"], help="出力言語 (ja: 日本語 / en: English)")
     args = parser.parse_args()
 
-    cap = cv2.VideoCapture(args.camera)
+    cam_src = parse_camera_source(args.camera)
+    cap = cv2.VideoCapture(cam_src)
     if not cap.isOpened():
-        print("カメラを開けませんでした。", file=sys.stderr)
-        print("システム設定 > プライバシーとセキュリティ > カメラ で実行端末(ターミナル等)を許可してください。", file=sys.stderr)
+        print(f"カメラ({cam_src!r})を開けませんでした。", file=sys.stderr)
+        print("- macOS: システム設定 > プライバシーとセキュリティ > カメラ で許可", file=sys.stderr)
+        print("- WSL2: usbipd-win でカメラをアタッチ (例: usbipd attach --wsl --busid X-Y)", file=sys.stderr)
+        print("        または --camera rtsp://... / http://.../stream を指定", file=sys.stderr)
         return 2
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
